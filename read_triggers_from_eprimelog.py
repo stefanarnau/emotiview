@@ -37,5 +37,18 @@ for filepath in glob.glob(os.path.join(path_in, "*.txt")):
         
         # Check if Prcedures line
         if in_block and "Procedure: " in line:
-            procedures.append(line.strip())
+            
+            # Get procedure
+            procedure = line.strip().split(" ")[1]
+            
+            # If bisbas scale
+            if procedure == "bisBasProc":
+                event = {"type": "bisbas"}
+                
+            
+            
+            procedures.append(procedure)
+            
+            
+set_procedures = list(set(procedures))
 
