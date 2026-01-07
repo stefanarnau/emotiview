@@ -220,7 +220,7 @@ for s = 1 : length(subject_list)
 
         % Add channel locations
         EEG = pop_chanedit(EEG, 'lookup', 'standard-10-5-cap385.elp');
-
+        aa=bb
         % Save eeg dataset
         pop_saveset(EEG, 'filename', [subject, '_markers_added.set'], 'filepath', path_eeg_out);
 
