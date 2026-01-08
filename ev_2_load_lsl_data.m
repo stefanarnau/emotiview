@@ -2,8 +2,9 @@ clear all;
 
 % Path vars
 path_in = '/mnt/data_dump/emotiview/0_raw/';
-path_eeg_out = '/mnt/data_dump/emotiview/1_markers_added/';
+path_eeg_out = '/mnt/data_dump/emotiview/1_markers_added_eeg/';
 path_eeglab = '/home/plkn/eeglab2025.0.0/';
+path_nirs_out = '/mnt/data_dump/emotiview/1_nirs_data/';
 
 % Create subject list
 subject_list = {'EV_002',...
@@ -29,6 +30,15 @@ for s = 1 : length(subject_list)
 
     % Load events from eprime as table
     events_eprime = readtable([path_in, 'eprime_events_subject_', subject, '.csv']);
+
+    % Remove nan-latency rows
+    events_eprime = events_eprime(~isnan(events_eprime.event_latency), :);
+
+    % Sort by latency
+    events_eprime = sortrows(events_eprime, 'event_latency');
+
+    % Convert ms to s
+    events_eprime.event_latency = events_eprime.event_latency ./ 1000;
 
     % Load (LSL) streams
     lsl_streams = load_xdf([path_in, subject, '.xdf']);
@@ -123,8 +133,6 @@ for s = 1 : length(subject_list)
 
     end
 
-
-
     % Scan for match using bisbas items as sync triggers
     for sync_trigger = 121 : 144
     
@@ -156,11 +164,19 @@ for s = 1 : length(subject_list)
         % Get sync trigger latency for eprime
         sync_latency_eprime = events_eprime.event_latency(find(events_eprime.trigger_number == sync_trigger));
 
-        % Calculate offset
-        sync_offset = sync_latency_lsl - sync_latency_eprime;
+        % Calculate delta
+        sync_offset = sync_latency_eprime - sync_latency_lsl;
     
-        % Remove offset
-        events_eprime.event_latency = events_eprime.event_latency + sync_offset;
+        % Remove offset from eprime events, everything in lsl time now
+        events_eprime.event_latency = events_eprime.event_latency - sync_offset;
+
+        % Get lsl time intercept (global clock at stream start)
+        lsl_time_intercept = eeg_stream.time_stamps(1);
+        
+        % Remove intercept from lsl time in streams and from eprime eventlist
+        events_eprime.event_latency = events_eprime.event_latency - lsl_time_intercept;
+        eeg_stream.time_stamps = eeg_stream.time_stamps - lsl_time_intercept;
+        nirs_stream.time_stamps = nirs_stream.time_stamps - lsl_time_intercept;
 
         % Collect EEG channels
         non_eeg = {'PB1', 'PB2', 'PB3', 'PB4', 'PB5', 'PPG', 'EDA', 'EKG', 'triggerStream'};
@@ -200,8 +216,7 @@ for s = 1 : length(subject_list)
         EEG.pnts    = size(eeg_data,2);
         EEG.trials  = 1;                     
         EEG.srate   = 1000;                   
-        EEG.xmin    = 0;
-        EEG.xmax    = (EEG.pnts - 1) / EEG.srate;
+        EEG.times = eeg_stream.time_stamps;
         EEG.setname = 'emotoview_eeg';
         EEG.chanlocs = struct('labels', channel_labels);
         EEG.event = struct([]);
@@ -211,7 +226,7 @@ for s = 1 : length(subject_list)
         % Collect events
         for e = 1 : height(events_eprime)
             EEG.event(e).type    = events_eprime.event_type{e}; 
-            EEG.event(e).latency = events_eprime.event_latency(e);
+            EEG.event(e).latency = events_eprime.event_latency(e) * EEG.srate;
             EEG.event(e).code = events_eprime.trigger_number(e);
         end
 
@@ -220,9 +235,29 @@ for s = 1 : length(subject_list)
 
         % Add channel locations
         EEG = pop_chanedit(EEG, 'lookup', 'standard-10-5-cap385.elp');
-        aa=bb
+
         % Save eeg dataset
         pop_saveset(EEG, 'filename', [subject, '_markers_added.set'], 'filepath', path_eeg_out);
+
+        % Get list of nirs channel labels
+        nirs_channel_labels = {};
+        for ch = 1 : length(nirs_stream.info.desc.channels.channel)
+            nirs_channel_labels{ch} = nirs_stream.info.desc.channels.channel{ch}.label;
+        end
+
+        % Create a nirs struct
+        NIRS = struct();
+        NIRS.data = nirs_stream.time_series;
+        NIRS.times = nirs_stream.time_stamps;
+        NIRS.channel_labels = nirs_channel_labels;
+        NIRS.events = events_eprime;
+        NIRS.srate = nirs_stream.info.nominal_srate;
+        NIRS.nbchan = size(NIRS.data, 1);
+        NIRS.pnts = size(NIRS.data, 2);
+
+        % Save NIRS data
+        save([path_nirs_out, subject, '_nirs_data.mat'], 'NIRS');
+
 
     end
 end
