@@ -4,8 +4,10 @@ clear all;
 % Paths
 path_in = '/mnt/data_dump/emotiview/2_cleaned_continuous_eeg/ICA_data/';
 path_eeglab = '/home/plkn/eeglab2025.0.0/';
+path_csd ='/home/plkn/CSDtoolbox/';
 
-% Init eeglab
+% Init eeglab and add csd toolbox
+addpath(genpath(path_csd));
 addpath(path_eeglab);
 eeglab;
 
@@ -18,7 +20,7 @@ subject_list = {'ICA_EV_002.set',...
                 };
 
 % Result vars
-spectra_poz = [];
+spectra = [];
 
 % Loop
 for s = 1 : length(subject_list)
@@ -30,6 +32,7 @@ for s = 1 : length(subject_list)
     EEG.nobrainer = find(EEG.etc.ic_classification.ICLabel.classifications(:, 3) > 0.3);
     EEG = pop_subcomp(EEG, EEG.nobrainer, 0);
 
+    % Get movie events for epoch identification
     movies = [];
     counter = 0;
 
@@ -76,55 +79,97 @@ for s = 1 : length(subject_list)
 
     % Epoch
     subject = subject_list{s};
-    EEG = pop_epoch(EEG, {'mid_resting'}, [-60, + 60], 'newname', [subject '_epoched'], 'epochinfo', 'yes');
+    EEG = pop_epoch(EEG, {'mid_resting'}, [-45, 45], 'newname', [subject '_epoched'], 'epochinfo', 'yes');
 
-    % Do spectopo for poz
-    idx_poz = find(strcmpi({EEG.chanlocs.labels}, 'POz'));     
-    freq_range = [1, 40];
-    spectra_epochs = [];
-    for e = 1 : EEG.trials
+    % Define channels of interest
+    channel_labels = {'POz', 'F3', 'F4', 'Fz'};
 
-        data = squeeze(EEG.data(idx_poz, :, e));
+    % Iterate channels
+    for ch = 1 : length(channel_labels)
 
-        nfft = EEG.srate * 4;  % e.g., 4-second window → 1000 points at Fs=250
-        noverlap = nfft/2;     % 50% overlap
-        
-        [spectra_epochs(e, :), freqs] = spectopo(data, 0, EEG.srate, ...
-                                     'freqrange', [0, 40], ...
-                                     'winsize', nfft, ...
-                                     'overlap', noverlap, ...
-                                     'plot', 'off');
-    end
+        % Do spectopo
+        idx_chan = find(strcmpi({EEG.chanlocs.labels}, channel_labels{ch}));     
+        freq_range = [1, 40];
+        spectra_epochs = [];
+        for e = 1 : EEG.trials
+    
+            data = squeeze(EEG.data(idx_chan, :, e));
+    
+            nfft = EEG.srate * 4;  % e.g., 4-second window → 1000 points at Fs=250
+            noverlap = nfft/2;     % 50% overlap
+            
+            [spectra_epochs(e, :), freqs] = spectopo(data, 0, EEG.srate, ...
+                                         'freqrange', [0, 40], ...
+                                         'winsize', nfft, ...
+                                         'overlap', noverlap, ...
+                                         'plot', 'off');
+        end
+    
+        % Average within condition
+        for t = 1 : 3
+            type_idx = movies(:, 1) == t;
+            spectra(ch, s, t, :) = mean(spectra_epochs(type_idx, :), 1);
+        end
 
-    % Average within condition
-    for t = 1 : 3
-        type_idx = movies(:, 1) == t;
-        spectra_poz(s, t, :) = mean(spectra_epochs(type_idx, :), 1);
     end
 
 end
 
+% Iterate channels for plotting
+for ch = 1 : length(channel_labels) + 1
 
 
-n_subjects = size(spectra_poz, 1);
-colors = {'r','g','b'};
-figure()
-for subj = 1 : n_subjects
+
+    if ch == length(channel_labels) + 1
+        idx_f3 = find(strcmpi(channel_labels, 'F3'));
+        idx_f4 = find(strcmpi(channel_labels, 'F4'));
+        chanlab = 'FAA';
+
+        spectra_chan = squeeze(spectra(idx_f4, :, :, :)) - squeeze(spectra(idx_f3, :, :, :));
+    else
+        chanlab = channel_labels{ch};
+        spectra_chan = squeeze(spectra(ch, :, :, :));
+    end
+
+    n_subjects = size(spectra_chan, 1);
+    colors = {'r','g','b'};
+    figure()
+    for subj = 1 : n_subjects
+        
+        subplot(2, 3, subj)
+        hold on;
+        
+        idx_plot = freqs <= 25;
     
-    subplot(2, 3, subj)
+        for cond = 1 : 3
+            pd = squeeze(spectra_chan(subj, cond, idx_plot));
+            plot(freqs(idx_plot), pd, 'Color', colors{cond}, 'LineWidth', 2);
+        end
+        
+        xlabel('Frequency (Hz)');
+        ylabel('Power (\muV^2/Hz)');
+        title([chanlab, ' - Subject ' num2str(subj)]);
+        legend('neg','neu','pos');
+        grid on;
+        hold off;
+
+    end
+    
+    subplot(2, 3, 6)
     hold on;
     
     idx_plot = freqs <= 25;
-
+    
     for cond = 1 : 3
-        pd = squeeze(spectra_poz(subj, cond, idx_plot));
+        pd = squeeze(mean(spectra_chan(:, cond, idx_plot), 1));
         plot(freqs(idx_plot), pd, 'Color', colors{cond}, 'LineWidth', 2);
     end
     
     xlabel('Frequency (Hz)');
     ylabel('Power (\muV^2/Hz)');
-    title(['Subject ' num2str(subj)]);
+    title('Average ');
     legend('neg','neu','pos');
     grid on;
     hold off;
+
 end
