@@ -32,6 +32,9 @@ for s = 1 : length(subject_list)
     EEG.nobrainer = find(EEG.etc.ic_classification.ICLabel.classifications(:, 3) > 0.3);
     EEG = pop_subcomp(EEG, EEG.nobrainer, 0);
 
+    % Apply CSD
+    EEG = pop_currentdensity(EEG, 'method', 'spline');
+
     % Get movie events for epoch identification
     movies = [];
     counter = 0;
@@ -70,7 +73,7 @@ for s = 1 : length(subject_list)
 
     % Epoch
     subject = subject_list{s};
-    EEG = pop_epoch(EEG, {'movie_start'}, [0, 120], 'newname', [subject '_epoched'], 'epochinfo', 'yes');
+    EEG = pop_epoch(EEG, {'movie_start'}, [130, 230], 'newname', [subject '_epoched'], 'epochinfo', 'yes');
 
     % Frontolateral electrodes
     idx_f3 = find(strcmpi({EEG.chanlocs.labels}, 'F3'));
@@ -109,11 +112,34 @@ end
 
 
 % Compute lateralization
-f43 = squeeze(spectra(:, 2, :, :)) - squeeze(spectra(:, 1, :, :));
+f43 = (squeeze(spectra(:, 2, :, :)) - squeeze(spectra(:, 1, :, :))) ./ (squeeze(spectra(:, 2, :, :)) + squeeze(spectra(:, 1, :, :)));
 f87 = squeeze(spectra(:, 4, :, :)) - squeeze(spectra(:, 3, :, :));
 fc43 = squeeze(spectra(:, 6, :, :)) - squeeze(spectra(:, 5, :, :));
 
+% Calculate frontal asymmetry
 faa = (f43 + f87 + fc43) ./ 3;
+
+% A simple plot
+figure()
+idx_alpha = freqs >= 8 & freqs <= 12;
+alpha_only = squeeze(mean(f43(:, :, idx_alpha), [1, 3]));
+plot(alpha_only)
+ylim([-0.1, 0.1])
+title('F43')
+
+figure()
+idx_alpha = freqs >= 8 & freqs <= 12;
+alpha_only = squeeze(mean(f87(:, :, idx_alpha), [1, 3]));
+plot(alpha_only)
+title('f87')
+
+figure()
+idx_alpha = freqs >= 8 & freqs <= 12;
+alpha_only = squeeze(mean(fc43(:, :, idx_alpha), [1, 3]));
+plot(alpha_only)
+title('fc43')
+
+
 
 n_subjects = size(faa, 1);
 colors = {'r','g','b'};
@@ -126,7 +152,7 @@ for subj = 1 : n_subjects
     idx_plot = freqs <= 25;
 
     for cond = 1 : 3
-        pd = squeeze(faa(subj, cond, idx_plot));
+        pd = squeeze(f43(subj, cond, idx_plot));
         plot(freqs(idx_plot), pd, 'Color', colors{cond}, 'LineWidth', 2);
     end
     
